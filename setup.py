@@ -22,9 +22,9 @@ setuptools.setup(
     description="Reservoir engineering tools",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/gregeasley/resaid",
+    url="https://github.com/geasley-rsc/resaid",
     project_urls={
-        "Bug Tracker": "https://github.com/pypa/sampleproject/issues",
+        "Bug Tracker": "https://github.com/geasley-rsc/resaid/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
