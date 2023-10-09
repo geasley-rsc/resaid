@@ -89,6 +89,9 @@ class decline_solver():
 
         dca_array = np.where(dca_array>self.qf,dca_array,0)
 
+        if 't_max' in vars_to_solve:
+            self.t_max = len(np.where(dca_array > 0))
+
         delta = np.sum(dca_array) - self.eur
 
 
