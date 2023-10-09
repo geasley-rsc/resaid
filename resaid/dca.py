@@ -4,7 +4,7 @@ import numpy as np
 import sys
 import statsmodels.api as sm
 from scipy.signal import argrelextrema
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, fsolve
 from dateutil.relativedelta import *
 import time
 import math
@@ -12,6 +12,105 @@ import math
 import warnings
 from tqdm import tqdm
 warnings.simplefilter("ignore")
+
+class decline_solver():
+
+    def __init__(self, qi=None, qf=None, de=None, dmin=None, b=None, eur=None, t_max=None):
+
+        
+        self.qi = qi
+        self.qf = qf
+        self.de = de
+        self.dmin = dmin
+        self.b = b
+        self.eur = eur
+        self.t_max = t_max
+        
+        self.variables_to_solve = []
+
+        self.l_dca = decline_curve()
+
+    def determine_solve(self):
+        # Use match/case to handle different input cases and calculate the missing variables
+
+        match (None, None):
+            case (self.qi, self.t_max):
+                self.variables_to_solve = ['qi','t_max']
+                self.qi = self.qf + self.de * self.eur
+                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+            case (self.qi, self.qf):
+                self.variables_to_solve = ['qi','qf']
+                self.qi = self.de * self.eur
+                self.qf = max(self.qi - self.de * self.eur,1)
+            case (self.qi, self.de):
+                self.variables_to_solve = ['qi','de']
+                self.qi = self.qf + self.dmin * self.eur
+                self.de = (self.qi - self.qf) / self.eur
+            case (self.qi, self.eur):
+                self.variables_to_solve = ['qi','eur']
+                self.qi = self.qf /self.de 
+                self.eur = (self.qi - self.qf) / self.de
+            case (self.t_max, self.qf):
+                self.variables_to_solve = ['t_max','qf']
+                self.qf = max(self.qi - self.de * self.eur,1)
+                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+            case (self.t_max, self.de):
+                self.variables_to_solve = ['t_max','de']
+                self.de = (self.qi - self.qf) / self.eur
+                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+            case (self.t_max, self.eur):
+                self.variables_to_solve = ['t_max','eur']
+                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+                self.eur = (self.qi - self.qf) / self.de
+            case (self.qf, self.de):
+                self.variables_to_solve = ['qf','de']
+                self.de = (self.qi) / self.eur
+                self.qf = max(self.qi - self.de * self.eur,1)
+            case (self.qf, self.eur):
+                self.variables_to_solve = ['qf','eur']
+                self.eur = (self.qi) / self.de
+                self.qf = max(self.qi - self.de * self.eur,1)
+            case (self.de, self.eur):
+                self.variables_to_solve = ['de','eur']
+                self.eur = self.qi*self.t_max
+                self.de = (self.qi - self.qf) / self.eur
+
+
+    def dca_delta(self,vars_to_solve):
+
+        for var_name, var_value in zip(self.variables_to_solve, vars_to_solve):
+            setattr(self, var_name, var_value)
+
+        self.l_dca.D_MIN = self.dmin
+        t_range = np.array(range(1,int(self.t_max)))
+
+        dca_array = np.array(self.l_dca.arps_decline(t_range,self.qi,self.de,self.b,0))
+
+
+        dca_array = np.where(dca_array>self.qf,dca_array,0)
+
+        delta = np.sum(dca_array) - self.eur
+
+
+
+        return [delta] * 2 
+    
+    def solve(self):
+
+        self.determine_solve()
+
+        initial_guess = [getattr(self, var) for var in self.variables_to_solve if getattr(self, var) is not None]
+
+        result, infodict, ier, msg = fsolve(self.dca_delta, initial_guess, full_output=True)
+
+
+        if ier==1:
+            for var_name, var_value in zip(self.variables_to_solve, result):
+                setattr(self, var_name, var_value)
+            return self.qi, self.t_max, self.qf, self.de, self.eur
+        else:
+            raise ValueError("Root-finding did not converge.")
+
 
 class decline_curve:
 
@@ -1029,3 +1128,16 @@ class decline_curve:
         #oil_df = oil_df.rename(columns={'T_INDEX':'Months Online'})
 
         self._typecurve = return_df
+
+
+if __name__ == '__main__':
+
+    l_dca = decline_solver(
+        qi=16805,
+        qf=3000,
+        eur=1104336.17516371,
+        b=.01,
+        dmin=.01/12
+    )
+
+    print(l_dca.solve())
