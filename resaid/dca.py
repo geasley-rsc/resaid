@@ -25,6 +25,10 @@ class decline_solver():
         self.b = b
         self.eur = eur
         self.t_max = t_max
+
+        self.l_qf = qf
+        self.l_t_max = t_max
+        self.delta = 0
         
         self.variables_to_solve = []
 
@@ -35,13 +39,13 @@ class decline_solver():
 
         match (None, None):
             case (self.qi, self.t_max):
-                self.variables_to_solve = ['qi','t_max']
+                self.variables_to_solve = ['qi']
                 self.qi = self.qf + self.de * self.eur
-                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+                self.t_max = 1200
             case (self.qi, self.qf):
-                self.variables_to_solve = ['qi','qf']
-                self.qi = self.de * self.eur
-                self.qf = max(self.qi - self.de * self.eur,1)
+                self.variables_to_solve = ['qi']
+                self.qi = self.de * self.eur/2
+                self.qf = 1
             case (self.qi, self.de):
                 self.variables_to_solve = ['qi','de']
                 self.qi = self.qf + self.dmin * self.eur
@@ -51,25 +55,25 @@ class decline_solver():
                 self.qi = self.qf /self.de 
                 self.eur = (self.qi - self.qf) / self.de
             case (self.t_max, self.qf):
-                self.variables_to_solve = ['t_max','qf']
+                self.variables_to_solve = ['qf']
                 self.qf = max(self.qi - self.de * self.eur,1)
-                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+                self.t_max = 1200
             case (self.t_max, self.de):
-                self.variables_to_solve = ['t_max','de']
+                self.variables_to_solve = ['de']
                 self.de = (self.qi - self.qf) / self.eur
-                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+                self.t_max = 1200
             case (self.t_max, self.eur):
-                self.variables_to_solve = ['t_max','eur']
-                self.t_max = np.log(self.qi / self.qf) / (self.b * self.de)
+                self.variables_to_solve = ['eur']
+                self.t_max = 1200
                 self.eur = (self.qi - self.qf) / self.de
             case (self.qf, self.de):
-                self.variables_to_solve = ['qf','de']
+                self.variables_to_solve = ['de']
                 self.de = (self.qi) / self.eur
-                self.qf = max(self.qi - self.de * self.eur,1)
+                self.qf = 1
             case (self.qf, self.eur):
-                self.variables_to_solve = ['qf','eur']
+                self.variables_to_solve = ['eur']
                 self.eur = (self.qi) / self.de
-                self.qf = max(self.qi - self.de * self.eur,1)
+                self.qf = 1
             case (self.de, self.eur):
                 self.variables_to_solve = ['de','eur']
                 self.eur = self.qi*self.t_max
@@ -82,21 +86,25 @@ class decline_solver():
             setattr(self, var_name, var_value)
 
         self.l_dca.D_MIN = self.dmin
-        t_range = np.array(range(1,int(self.t_max)))
+        t_range = np.array(range(0,int(self.t_max)))
 
         dca_array = np.array(self.l_dca.arps_decline(t_range,self.qi,self.de,self.b,0))
+
+        
 
 
         dca_array = np.where(dca_array>self.qf,dca_array,0)
 
-        if 't_max' in vars_to_solve:
-            self.t_max = len(np.where(dca_array > 0))
+
+        self.l_t_max = len(np.where(dca_array > 0)[0])
+        if self.l_t_max >0:
+            self.l_qf = dca_array[np.where(dca_array > 0)[0][-1]]
 
         delta = np.sum(dca_array) - self.eur
 
+        self.delta = delta
 
-
-        return [delta] * 2 
+        return [delta] * len(self.variables_to_solve)
     
     def solve(self):
 
@@ -106,13 +114,21 @@ class decline_solver():
 
         result, infodict, ier, msg = fsolve(self.dca_delta, initial_guess, full_output=True)
 
-
         if ier==1:
-            for var_name, var_value in zip(self.variables_to_solve, result):
-                setattr(self, var_name, var_value)
-            return self.qi, self.t_max, self.qf, self.de, self.eur
+            warning_flag = 0
         else:
-            raise ValueError("Root-finding did not converge.")
+            warning_flag = 1
+        
+
+        for var_name, var_value in zip(self.variables_to_solve, result):
+            setattr(self, var_name, var_value)
+
+        if 't_max' in self.variables_to_solve or len(self.variables_to_solve)==1:
+            self.t_max = self.l_t_max
+
+        if 'qf' in self.variables_to_solve or len(self.variables_to_solve)==1:
+            self.qf = self.l_qf
+        return self.qi, self.t_max, self.qf, self.de, self.eur, warning_flag, self.delta
 
 
 class decline_curve:
