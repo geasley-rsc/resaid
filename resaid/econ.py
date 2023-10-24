@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import sys
-from scipy.optimize import minimize
+from scipy.optimize import newton
 from tqdm import tqdm
 
 class npv_calc():
@@ -14,25 +14,24 @@ class npv_calc():
 
 
     def get_npv(self,discount_rate):
-        if np.sum(self._cashflow) < 0:
-            l_npv = -1
-        elif discount_rate < 0:
-            l_npv = 99999
-        else:
-            l_npv = np.sum(self._cashflow/ (1+discount_rate)**np.arange(0, len(self._cashflow)))
+        #if np.sum(self._cashflow) < 0:
+        #    l_npv = -1
+        #elif discount_rate < 0:
+        #    l_npv = 99999
+        #else:
+        l_npv = np.sum(self._cashflow/ (1+discount_rate)**np.arange(0, len(self._cashflow)))
 
-        return abs(l_npv)
+        return l_npv
     
     def get_irr(self):
         guess = .5/12
 
-        constraint_bounds = ((1e-6, None),)  # 1e-6 is a small positive number, you can adjust it
+        constraint_bounds = ((1e-6, .16),) 
 
-        # Setup the constraint
-        constraints = [{'type': 'ineq', 'fun': self.constraint, 'bounds': constraint_bounds}]
-
-
-        result = minimize(self.get_npv, guess, constraints=constraints).x[0]
+        if np.sum(self._cashflow) < 0:
+            result = 0
+        else:
+            result = newton(self.get_npv, guess)
 
         try:
             result = np.power(1+result,12)-1
