@@ -877,8 +877,12 @@ class decline_curve:
             'IPG':[],
             'B':[],
             'DE':[],
-            'T0':[]
+            'T0':[],
+            'MINOR_RATIO':[],
+            'WATER_RATIO':[]
         }
+
+        #param_df = self.vect_generate_params_tc(self._flowstream_dataframe)
 
         online_df = self._flowstream_dataframe[['UID','OIL',"GAS",'WATER']].groupby('UID').sum().reset_index()
 
@@ -919,20 +923,27 @@ class decline_curve:
                 flow_dict['B'].append(row['b'])
                 flow_dict['DE'].append(row['di'])
                 flow_dict['T0'].append(row['T0_DATE'])
+                flow_dict['MINOR_RATIO'].append(row['minor_ratio'])
+                flow_dict['WATER_RATIO'].append(row['water_ratio'])
                 if row['major'] == "OIL":
-                    flow_dict['IPO'].append(max(dca[row['major']]))
+                    #flow_dict['IPO'].append(max(dca[row['major']]))
+                    flow_dict['IPO'].append(row['qi'])
                     if np.isnan(row['minor_ratio']):
                         flow_dict['IPG'].append(max(dca[row['major']])*0)
                     else:
-                        flow_dict['IPG'].append(max(dca[row['major']])*row['minor_ratio'])
+                        #flow_dict['IPG'].append(max(dca[row['major']])*row['minor_ratio'])
+                        flow_dict['IPG'].append(row['qi']*row['minor_ratio'])
                 else:
-                    flow_dict['IPG'].append(max(dca[row['major']]))
+                    #flow_dict['IPG'].append(max(dca[row['major']]))
+                    flow_dict['IPG'].append(row['qi'])
                     if np.isnan(row['minor_ratio']):
                         flow_dict['IPO'].append(max(dca[row['major']])*0)
                     else:
-                        flow_dict['IPO'].append(max(dca[row['major']])*row['minor_ratio'])
+                        #flow_dict['IPO'].append(max(dca[row['major']])*row['minor_ratio'])
+                        flow_dict['IPO'].append(row['qi']*row['minor_ratio'])
         flow_dict = pd.DataFrame(flow_dict)
         online_df = online_df.merge(flow_dict,left_on='UID',right_on='UID')
+        online_df['ARIES_DE'] = online_df.apply(lambda x: (1-np.power(((x.DE*12)*x.B+1),(-1/x.B)))*100, axis=1)
         self._oneline = online_df
 
     def generate_flowstream(self, num_months=1200, denormalize=False, actual_dates=False, _verbose=False):
