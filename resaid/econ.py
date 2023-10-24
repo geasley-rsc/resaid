@@ -21,8 +21,6 @@ class npv_calc():
         else:
             l_npv = np.sum(self._cashflow/ (1+discount_rate)**np.arange(0, len(self._cashflow)))
 
-        print(l_npv)
-
         return abs(l_npv)
     
     def get_irr(self):
