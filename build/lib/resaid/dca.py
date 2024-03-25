@@ -4,7 +4,7 @@ import numpy as np
 import sys
 import statsmodels.api as sm
 from scipy.signal import argrelextrema
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, fsolve
 from dateutil.relativedelta import *
 import time
 import math
@@ -12,6 +12,124 @@ import math
 import warnings
 from tqdm import tqdm
 warnings.simplefilter("ignore")
+
+class decline_solver():
+
+    def __init__(self, qi=None, qf=None, de=None, dmin=None, b=None, eur=None, t_max=None):
+
+        
+        self.qi = qi
+        self.qf = qf
+        self.de = de
+        self.dmin = dmin
+        self.b = b
+        self.eur = eur
+        self.t_max = t_max
+
+        self.l_qf = qf
+        self.l_t_max = t_max
+        self.delta = 0
+        
+        self.variables_to_solve = []
+
+        self.l_dca = decline_curve()
+
+    def determine_solve(self):
+        # Use match/case to handle different input cases and calculate the missing variables
+
+        match (None, None):
+            case (self.qi, self.t_max):
+                self.variables_to_solve = ['qi']
+                self.qi = self.qf + self.de * self.eur
+                self.t_max = 1200
+            case (self.qi, self.qf):
+                self.variables_to_solve = ['qi']
+                self.qi = self.de * self.eur/2
+                self.qf = 1
+            case (self.qi, self.de):
+                self.variables_to_solve = ['qi','de']
+                self.qi = self.qf + self.dmin * self.eur
+                self.de = (self.qi - self.qf) / self.eur
+            case (self.qi, self.eur):
+                self.variables_to_solve = ['qi','eur']
+                self.qi = self.qf /self.de 
+                self.eur = (self.qi - self.qf) / self.de
+            case (self.t_max, self.qf):
+                self.variables_to_solve = ['qf']
+                self.qf = max(self.qi - self.de * self.eur,1)
+                self.t_max = 1200
+            case (self.t_max, self.de):
+                self.variables_to_solve = ['de']
+                self.de = (self.qi - self.qf) / self.eur
+                self.t_max = 1200
+            case (self.t_max, self.eur):
+                self.variables_to_solve = ['eur']
+                self.t_max = 1200
+                self.eur = (self.qi - self.qf) / self.de
+            case (self.qf, self.de):
+                self.variables_to_solve = ['de']
+                self.de = (self.qi) / self.eur
+                self.qf = 1
+            case (self.qf, self.eur):
+                self.variables_to_solve = ['eur']
+                self.eur = (self.qi) / self.de
+                self.qf = 1
+            case (self.de, self.eur):
+                self.variables_to_solve = ['de','eur']
+                self.eur = self.qi*self.t_max
+                self.de = (self.qi - self.qf) / self.eur
+
+
+    def dca_delta(self,vars_to_solve):
+
+        for var_name, var_value in zip(self.variables_to_solve, vars_to_solve):
+            setattr(self, var_name, var_value)
+
+        self.l_dca.D_MIN = self.dmin
+        t_range = np.array(range(0,int(self.t_max)))
+
+        dca_array = np.array(self.l_dca.arps_decline(t_range,self.qi,self.de,self.b,0))
+
+        
+
+
+        dca_array = np.where(dca_array>self.qf,dca_array,0)
+
+
+        self.l_t_max = len(np.where(dca_array > 0)[0])
+        if self.l_t_max >0:
+            self.l_qf = dca_array[np.where(dca_array > 0)[0][-1]]
+
+        delta = np.sum(dca_array) - self.eur
+
+        self.delta = delta
+
+        return [delta] * len(self.variables_to_solve)
+    
+    def solve(self):
+
+        self.determine_solve()
+
+        initial_guess = [getattr(self, var) for var in self.variables_to_solve if getattr(self, var) is not None]
+
+        result, infodict, ier, msg = fsolve(self.dca_delta, initial_guess, full_output=True)
+
+        if ier==1:
+            warning_flag = 0
+        else:
+            warning_flag = 1
+        
+
+        for var_name, var_value in zip(self.variables_to_solve, result):
+            setattr(self, var_name, var_value)
+
+        if 't_max' in self.variables_to_solve or len(self.variables_to_solve)==1:
+            self.t_max = self.l_t_max
+
+        if 'qf' in self.variables_to_solve or len(self.variables_to_solve)==1:
+            self.qf = self.l_qf
+        return self.qi, self.t_max, self.qf, self.de, self.eur, warning_flag, self.delta
+
 
 class decline_curve:
 
@@ -759,8 +877,12 @@ class decline_curve:
             'IPG':[],
             'B':[],
             'DE':[],
-            'T0':[]
+            'T0':[],
+            'MINOR_RATIO':[],
+            'WATER_RATIO':[]
         }
+
+        #param_df = self.vect_generate_params_tc(self._flowstream_dataframe)
 
         online_df = self._flowstream_dataframe[['UID','OIL',"GAS",'WATER']].groupby('UID').sum().reset_index()
 
@@ -801,20 +923,27 @@ class decline_curve:
                 flow_dict['B'].append(row['b'])
                 flow_dict['DE'].append(row['di'])
                 flow_dict['T0'].append(row['T0_DATE'])
+                flow_dict['MINOR_RATIO'].append(row['minor_ratio'])
+                flow_dict['WATER_RATIO'].append(row['water_ratio'])
                 if row['major'] == "OIL":
-                    flow_dict['IPO'].append(max(dca[row['major']]))
+                    #flow_dict['IPO'].append(max(dca[row['major']]))
+                    flow_dict['IPO'].append(row['qi'])
                     if np.isnan(row['minor_ratio']):
                         flow_dict['IPG'].append(max(dca[row['major']])*0)
                     else:
-                        flow_dict['IPG'].append(max(dca[row['major']])*row['minor_ratio'])
+                        #flow_dict['IPG'].append(max(dca[row['major']])*row['minor_ratio'])
+                        flow_dict['IPG'].append(row['qi']*row['minor_ratio'])
                 else:
-                    flow_dict['IPG'].append(max(dca[row['major']]))
+                    #flow_dict['IPG'].append(max(dca[row['major']]))
+                    flow_dict['IPG'].append(row['qi'])
                     if np.isnan(row['minor_ratio']):
                         flow_dict['IPO'].append(max(dca[row['major']])*0)
                     else:
-                        flow_dict['IPO'].append(max(dca[row['major']])*row['minor_ratio'])
+                        #flow_dict['IPO'].append(max(dca[row['major']])*row['minor_ratio'])
+                        flow_dict['IPO'].append(row['qi']*row['minor_ratio'])
         flow_dict = pd.DataFrame(flow_dict)
         online_df = online_df.merge(flow_dict,left_on='UID',right_on='UID')
+        online_df['ARIES_DE'] = online_df.apply(lambda x: (1-np.power(((x.DE*12)*x.B+1),(-1/x.B)))*100, axis=1)
         self._oneline = online_df
 
     def generate_flowstream(self, num_months=1200, denormalize=False, actual_dates=False, _verbose=False):
@@ -1029,3 +1158,16 @@ class decline_curve:
         #oil_df = oil_df.rename(columns={'T_INDEX':'Months Online'})
 
         self._typecurve = return_df
+
+
+if __name__ == '__main__':
+
+    l_dca = decline_solver(
+        qi=16805,
+        qf=3000,
+        eur=1104336.17516371,
+        b=.01,
+        dmin=.01/12
+    )
+
+    print(l_dca.solve())
